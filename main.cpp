@@ -1,9 +1,13 @@
 #include <iostream>
+#include <fstream>
 #include <string>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
 #include <algorithm>
+#include <random>
+#include <chrono>
 
 using namespace std;
 
@@ -14,7 +18,18 @@ const u64 M1 = 1000000007ULL, B1 = 911382323ULL;
 const u64 M2 = 998244353ULL,  B2 = 972663749ULL;
 const int SIGMA = 5;
 
+const string LETTER = "$ACGT";
 
+static int code(char c) {
+    switch (c) {
+        case '$': return 0;
+        case 'A': return 1;
+        case 'C': return 2;
+        case 'G': return 3;
+        case 'T': return 4;
+        default:  return -1;
+    }
+}
 
 static int castom_dist(const char *a, long n, const char *b, long m, long k) {
     if (labs(n - m) > k)
@@ -71,6 +86,15 @@ static int castom_dist(const char *a, long n, const char *b, long m, long k) {
     return prev[n - m + k];
 }
 
+static int edit_distance(const string &a, const string &b, long k = 100) {
+    int res = castom_dist(a.data(), a.size(), b.data(), b.size(), k);
+    while (res > k) {
+        k *= 2;
+        res = castom_dist(a.data(), a.size(), b.data(), b.size(), k);
+    }
+    return res;
+}
+
 static u64 power(u64 b, long e, u64 mod) {
     u64 r = 1;
     b %= mod;
@@ -88,25 +112,25 @@ static vector<u64> kmer_codes(const string &st, long k) {
     codes.reserve(n - k + 1);
     if (k <= 31) {
         u64 mask = (1ULL << (2 * k)) - 1;
-        u64 code = 0;
+        u64 code_ = 0;
         for (long i = 0; i < k - 1; i++)
-            code = (code << 2) | letter(st[i]);
+            code_ = (code_ << 2) | (u64)(code(st[i]) - 1);
         for (long i = k - 1; i < n; i++) {
-            code = ((code << 2) | letter(st[i])) & mask;
-            codes.push_back(code);
+            code_ = ((code_ << 2) | (u64)(code(st[i]) - 1)) & mask;
+            codes.push_back(code_);
         }
     } else {
         u64 p1 = power(B1, k, M1);
         u64 p2 = power(B2, k, M2);
         u64 h1 = 0, h2 = 0;
         for (long i = 0; i < k; i++) {
-            u64 v = letter(st[i]) + 1;
+            u64 v = code(st[i]);
             h1 = (h1 * B1 + v) % M1;
             h2 = (h2 * B2 + v) % M2;
         }
         codes.push_back(h1 * M2 + h2);
         for (long i = k; i < n; i++) {
-            u64 v = letter(st[i]) + 1, o = letter(st[i - k]) + 1;
+            u64 v = code(st[i]), o = code(st[i - k]);
             h1 = (h1 * B1 + v + M1 * M1 - o * p1) % M1;
             h2 = (h2 * B2 + v + M2 * M2 - o * p2) % M2;
             codes.push_back(h1 * M2 + h2);
@@ -115,7 +139,7 @@ static vector<u64> kmer_codes(const string &st, long k) {
     return codes;
 }
 
-string mostFrequentKMer(const string &st, long k) {
+static string mostFrequentKMer(const string &st, long k) {
     vector<u64> codes = kmer_codes(st, k);
     vector<u64> all(codes);
     sort(all.begin(), all.end());
@@ -150,7 +174,7 @@ static vector<int> encode(const string &st) {
 static vector<int> suffix_array(const vector<int> &s) {
     int n = s.size();
     vector<int> sa(n), rank(s), tmp(n), new_rank(n);
-    vector<int> cnt(max(n, 5) + 1);
+    vector<int> cnt(max(n, SIGMA) + 1);
 
     for (int i = 0; i < n; i++) cnt[s[i] + 1]++;
     for (int c = 1; c < (int)cnt.size(); c++) cnt[c] += cnt[c - 1];
@@ -180,17 +204,7 @@ static vector<int> suffix_array(const vector<int> &s) {
     }
 }
 
-static string BWT(const string &st) {
-    vector<int> s = encode(st);
-    vector<int> sa = suffix_array(s);
-    int n = s.size();
-    string result(n, '?');
-    for (int j = 0; j < n; j++)
-        result[j] = LETTER[s[(sa[j] - 1 + n) % n]];
-    return result;
-}
-
-static string invBWT(string &st) {
+static string inverse_bwt(string st) {
     int n = st.size();
 
     for (int i = 0; i < n; i++)
@@ -216,47 +230,6 @@ static string invBWT(string &st) {
         row = total_shift[cur] + rank[row];
     }
     return fin;
-}
-
-static vector<int> encode(const string &st) {
-    vector<int> s(st.size() + 1, 0);
-    for (size_t i = 0; i < st.size(); i++)
-        s[i] = code(st[i]);
-    return s;
-}
-
-static vector<int> suffix_array(const vector<int> &s) {
-    int n = s.size();
-    vector<int> sa(n), rank(s), tmp(n), new_rank(n);
-    vector<int> cnt(max(n, SIGMA) + 1);
-
-    // k = 1: сортировка подсчётом по коду буквы
-    for (int i = 0; i < n; i++) cnt[s[i] + 1]++;
-    for (int c = 1; c < (int)cnt.size(); c++) cnt[c] += cnt[c - 1];
-    for (int i = 0; i < n; i++) sa[cnt[s[i]]++] = i;
-
-    for (int k = 1;; k *= 2) {
-        if (k > 1) {
-            new_rank[sa[0]] = 0;
-            for (int j = 1; j < n; j++) {
-                int prev = sa[j - 1], cur = sa[j];
-                bool differ = rank[prev] != rank[cur] ||
-                              rank[(prev + k / 2) % n] != rank[(cur + k / 2) % n];
-                new_rank[cur] = new_rank[prev] + differ;
-            }
-            rank.swap(new_rank);
-            if (rank[sa[n - 1]] == n - 1)
-                return sa;
-        }
-
-        for (int j = 0; j < n; j++)
-            tmp[j] = ((sa[j] - k) % n + n) % n;
-
-        fill(cnt.begin(), cnt.end(), 0);
-        for (int j = 0; j < n; j++) cnt[rank[tmp[j]] + 1]++;
-        for (int c = 1; c < (int)cnt.size(); c++) cnt[c] += cnt[c - 1];
-        for (int j = 0; j < n; j++) sa[cnt[rank[tmp[j]]]++] = tmp[j];
-    }
 }
 
 static vector<int> build_bwt(const vector<int> &s, const vector<int> &sa) {
@@ -287,8 +260,8 @@ static vector<vector<int>> build_occ(const vector<int> &bwt) {
     return occ;
 }
 
-static pair<int, int> find(const string &read, const vector<int> &total_shift,
-                           const vector<vector<int>> &occ) {
+static pair<int, int> fm_find(const string &read, const vector<int> &total_shift,
+                              const vector<vector<int>> &occ) {
     int lo = 0, hi = (int)occ[0].size() - 1;
     for (int i = (int)read.size() - 1; i >= 0; i--) {
         int c = code(read[i]);
@@ -311,7 +284,7 @@ static int covered_bases(const string &genome, const vector<string> &reads) {
     int g = genome.size();
     vector<int> diff(g + 1, 0);
     for (const string &read : reads) {
-        pair<int, int> r = find(read, total_shift, occ);
+        pair<int, int> r = fm_find(read, total_shift, occ);
         if (r.second - r.first == 1) {
             int p = sa[r.first];
             diff[p] += 1;
@@ -326,4 +299,54 @@ static int covered_bases(const string &genome, const vector<string> &reads) {
             covered++;
     }
     return covered;
+}
+
+static string read_fasta(const string &path) {
+    ifstream in(path);
+    if (!in) {
+        cerr << "cannot open " << path << "\n";
+        exit(2);
+    }
+    string genome, line;
+    while (getline(in, line)) {
+        if (line.empty() || line[0] == '>')
+            continue;
+        for (char c : line)
+            if (!isspace((unsigned char)c))
+                genome += (char)toupper((unsigned char)c);
+    }
+    return genome;
+}
+
+int main(int argc, char **argv) {
+	if (argc < 3) {
+		cerr << "Usage: " << argv[0] << " <genome.fasta> <reads.fastq>\n";
+		return 1;
+	}
+
+	string genome = read_fasta(argv[1]);
+	vector<string> reads;
+	ifstream in(argv[2]);
+	if (!in) {
+		cerr << "cannot open " << argv[2] << "\n";
+		return 2;
+	}
+	string header, seq, plus, qual;
+	while (getline(in, header)) {
+		if (header.empty())
+			continue;
+		if (header[0] != '@' || !getline(in, seq) || !getline(in, plus) ||
+		    !getline(in, qual) || plus.empty() || plus[0] != '+') {
+			cerr << "bad FASTQ record after read " << reads.size() << "\n";
+			return 3;
+		}
+		if (!seq.empty() && seq.back() == '\r')
+			seq.pop_back();
+		reads.push_back(seq);
+	}
+	cerr << "reads: " << reads.size() << "\n";
+
+	int covered = covered_bases(genome, reads);
+	cout << "Covered bases: " << covered << "\n";
+	return 0;
 }
